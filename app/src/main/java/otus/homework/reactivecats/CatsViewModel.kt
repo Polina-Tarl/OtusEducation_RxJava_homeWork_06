@@ -10,15 +10,13 @@ import io.reactivex.Observable
 import io.reactivex.android.schedulers.AndroidSchedulers
 import io.reactivex.disposables.CompositeDisposable
 import io.reactivex.schedulers.Schedulers
-import retrofit2.Call
-import retrofit2.Callback
-import retrofit2.Response
+import java.util.concurrent.TimeUnit
 
 @SuppressLint("CheckResult")
 class CatsViewModel(
-    catsService: CatsService,
-    localCatFactsGenerator: LocalCatFactsGenerator,
-    context: Context
+    private val catsService: CatsService,
+    private val localCatFactsGenerator: LocalCatFactsGenerator,
+    private val context: Context
 ) : ViewModel() {
 
     private val _catsLiveData = MutableLiveData<Result>()
@@ -28,32 +26,30 @@ class CatsViewModel(
 
     init {
         getFacts()
+    }
 
-        val getCatsDisposable = catsService.getCatFact()
+    private fun getFacts() {
+        val getCatsDisposable = Observable.interval(2L, TimeUnit.SECONDS)
+            .flatMap { catsService.getCatFact() }
             .subscribeOn(Schedulers.io())
             .observeOn(AndroidSchedulers.mainThread())
             .distinctUntilChanged()
+            .repeat()
+            .map {
+                it.body() ?: localCatFactsGenerator.generateCatFact().blockingGet()
+            }
             .subscribe(
-                { response ->
-                    response?.body()?.let { fact ->
-                        _catsLiveData.value = Success(fact)
-                    } ?: run {
-                        _catsLiveData.value = Error(
-                            response?.errorBody()?.string() ?: context.getString(
-                                R.string.default_error_text
-                            )
-                        )
-                    }
+                { fact ->
+                    _catsLiveData.value = Success(fact)
                 },
-                { _ ->
-                    _catsLiveData.value = ServerError
-                }
-            )
+                {
+                    _catsLiveData.value = Success(
+                        localCatFactsGenerator.generateCatFact().blockingGet()
+                    )
+                })
 
         compositeDisposable.add(getCatsDisposable)
     }
-
-    fun getFacts() {}
 
     override fun onCleared() {
         super.onCleared()
